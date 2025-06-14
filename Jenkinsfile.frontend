@@ -1,0 +1,136 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node24'
+    }
+    environment {
+        DOCKER_CREDENTIALS_ID = 'docker'
+        SONAR_CREDENTIALS_ID = 'sonar-token'
+        SCANNER_HOME = tool 'sonar-scanner'
+        AWS_REGION = 'us-east-1'
+        BACKEND_URL = 'http://backend:8080'
+    }
+
+    options {
+        timestamps()
+    }
+
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+                sh "docker rm -f vnplaterecfrontend || true"
+            }
+        }
+
+        stage('Set Timestamp') {
+            steps {
+                script {
+                    env.TIMESTAMP = sh(script: 'date +%s', returnStdout: true).trim()
+                }
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Yangchann/vnplaterec-frontend.git'
+            }
+        }
+        
+       stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.organization=vnplaterec \
+                        -Dsonar.projectName=vnplaterecfrontend \
+                        -Dsonar.projectKey=vnplaterecfrontend'''
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: true, credentialsId: SONAR_CREDENTIALS_ID
+                }
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        echo 'Login...'
+                        sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}"
+
+                        echo 'Build image ...'
+                        sh "docker build --build-arg NEXT_PUBLIC_API_URL=${BACKEND_URL} -t vnplaterecfrontend ."
+
+                        echo 'Tag & Push image ...'
+                        sh "docker tag vnplaterecfrontend cnmeow/vnplaterecfrontend:${TIMESTAMP}"
+                        sh "docker push cnmeow/vnplaterecfrontend:${TIMESTAMP}"
+                    }
+                }
+            }
+        }
+
+
+        stage('Docker Trivy Scan') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        echo 'Login...'
+                        sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}"
+                        sh "trivy image --severity HIGH,CRITICAL cnmeow/vnplaterecfrontend:${TIMESTAMP}"
+                        sh "docker run -d --name vnplaterecfrontend -p 80:80 cnmeow/vnplaterecfrontend:${TIMESTAMP}"
+                    }
+                }
+            }
+        }
+
+        stage('Checkout HelmRepo Git') {
+            steps {
+                sh '''
+                  rm -rf helm-charts
+                  git clone https://github.com/cnmeow/vnplaterec-helmchart.git helm-charts
+                '''
+            }
+        }
+
+        stage('Update image tag in values.yaml') {
+            steps {
+                dir("helm-charts/services/frontend/helm") {
+                sh """
+                    echo 'Updating image tag in values.yaml...'
+                    sed -i'' -E "s/(tag:)[[:space:]]*\"[0-9]+\"/\1 \"${TIMESTAMP}\"/" values.yaml
+                    cat  values.yaml
+                    echo 'Committed changes to values.yaml'
+                    git config user.name "Jenkins"
+                    git config user.email "camnguyenmeow@gmail.com"
+                    git add values.yaml
+                    git commit -m "ci: update image tag to ${TIMESTAMP}" || echo "No changes to commit"
+                    git push origin main || echo "No changes to push"
+                """
+                }
+            }
+        }
+
+        stage('Configure AWS & kubeconfig') {
+          steps {
+            sh '''
+              aws eks --region ${AWS_REGION} update-kubeconfig --name vnplaterec
+            '''
+          }
+        }
+
+        stage('Deploy frontend with Helm') {
+          steps {
+            sh '''
+              helm upgrade --install frontend ./helm-charts/services/frontend/helm \
+                --namespace default \
+                --create-namespace
+            '''
+          }
+        }
+    }
+}
