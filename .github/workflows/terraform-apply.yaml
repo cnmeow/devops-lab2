@@ -51,17 +51,8 @@ jobs:
      - name: Terraform Apply
        run: |
          terraform apply -auto-approve -input=false
-         terraform output -json > tf-output.json
-         jq -r '
-         to_entries[] |
-         "\(.key) = \(if (.value.value | type == "string") then
-                        "\"\(.value.value)\""
-                      elif (.value.value | type == "array") or (.value.value | type == "object") then
-                        "\(.value.value | @json)"
-                      else
-                        .value.value
-                      end)"
-         ' tf-output.json > tf-output.auto.tfvars
+         terraform output > raw_outputs.txt
+         cp raw_outputs.txt tf-output.auto.tfvars
 
      - name: Upload tfvars as artifact
        uses: actions/upload-artifact@v4
