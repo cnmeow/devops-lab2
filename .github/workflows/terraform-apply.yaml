@@ -51,11 +51,3 @@ jobs:
      - name: Terraform Apply
        run: |
          terraform apply -auto-approve -input=false
-         terraform output > raw_outputs.txt
-         cp raw_outputs.txt tf-output.auto.tfvars
-
-     - name: Upload tfvars as artifact
-       uses: actions/upload-artifact@v4
-       with:
-         name: tf-output
-         path: tf-output.auto.tfvars     
