@@ -51,8 +51,14 @@ jobs:
      - name: Terraform Apply
        run: |
          terraform apply -auto-approve -input=false
-         terraform output -json | jq -r 'to_entries | map("\(.key) = \"\(.value.value)\"") | .[]' > tf-output.auto.tfvars
-     
+         terraform output -json > tf-output.json
+         jq -r '
+           to_entries | map(
+             select(.value.value | type == "string") |
+             "\(.key) = \"\(.value.value)\""
+           ) | .[]
+         ' tf-output.json > tf-output.auto.tfvars
+         
      - name: Upload tfvars
        uses: actions/upload-artifact@v4
        with:
