@@ -30,11 +30,12 @@ jobs:
      
      - name: Terraform init
        run: terraform init 
+       working-directory: terraform
 
      - name: Run Checkov for security scanning
        uses: bridgecrewio/checkov-action@master
        with:
-        directory: .
+        directory: terraform
         framework: terraform
         soft_fail: true
        continue-on-error: false
@@ -42,6 +43,7 @@ jobs:
      - name: Terraform plan
        id: plan
        run: terraform plan
+       working-directory: terraform
        continue-on-error: false
     
      - name: Terraform Plan Status
@@ -49,5 +51,5 @@ jobs:
        run: exit 1
  
      - name: Terraform Apply
-       run: |
-         terraform apply -auto-approve -input=false
+       run: terraform apply -auto-approve -input=false
+       working-directory: terraform

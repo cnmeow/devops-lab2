@@ -1,6 +1,12 @@
-name: "Terraform with Checkov - Destroy"
+name: "Terraform with Checkov - Security Scan and Plan"
  
 on:
+ push:
+   branches:
+   - main
+ pull_request:
+   branches:
+   - main
  workflow_dispatch:
  
 env:
@@ -9,7 +15,7 @@ env:
 
 jobs:
  terraform:
-   name: "Terraform with Checkov - Security Scan and Deploy"
+   name: "Terraform Infrastructure Change Management"
    runs-on: ubuntu-latest
    defaults:
      run:
@@ -22,7 +28,7 @@ jobs:
        run: |
          echo "${{ secrets.EC2_KEY_PAIR }}" > key.pem
          chmod 400 key.pem
-     
+ 
      - name: Setup Terraform with specified version on the runner
        uses: hashicorp/setup-terraform@v2
        with:
@@ -30,11 +36,22 @@ jobs:
      
      - name: Terraform init
        run: terraform init 
+       working-directory: terraform
 
-     - name: Download tfvars
-       uses: actions/download-artifact@v4
+     - name: Run Checkov for security scanning
+       uses: bridgecrewio/checkov-action@master
        with:
-         name: tf-output
-     
-     - name: Terraform Destroy
-       run: terraform destroy -var-file=tf-output.auto.tfvars -auto-approve
+        directory: terraform
+        framework: terraform
+        soft_fail: true
+       continue-on-error: false
+ 
+     - name: Terraform plan
+       id: plan
+       run: terraform plan
+       working-directory: terraform
+       continue-on-error: false
+    
+     - name: Terraform Plan Status
+       if: steps.plan.outcome == 'failure'
+       run: exit 1
